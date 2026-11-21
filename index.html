@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<title>Easy Stars</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<style>
+  :root { --bg:#17212b; --panel:#1f2c3a; --accent:#5288c1; --text:#f5f5f5; --muted:#7f91a4; --gold:#ffcf3f; }
+  * { box-sizing:border-box; margin:0; padding:0; -webkit-tap-highlight-color:transparent; user-select:none; -webkit-user-select:none; }
+  html,body { height:100%; overflow:hidden; background:var(--bg); color:var(--text); font-family:system-ui,sans-serif; }
+  #app { display:flex; flex-direction:column; height:100%; max-width:480px; margin:0 auto; padding-top:env(safe-area-inset-top,0); }
+  header { padding:16px 16px 8px; text-align:center; }
+  .balance { font-size:44px; font-weight:800; letter-spacing:-1px; }
+  .balance span { color:var(--gold); }
+  .per-tap { font-size:13px; color:var(--muted); margin-top:2px; }
+  .energy { margin-top:12px; }
+  .energy-top { display:flex; justify-content:space-between; font-size:13px; color:var(--muted); margin-bottom:6px; }
+  .bar { height:10px; background:var(--panel); border-radius:6px; overflow:hidden; }
+  .bar i { display:block; height:100%; width:100%; background:var(--accent); border-radius:6px; transition:width .2s; }
+  main { flex:1; position:relative; overflow-y:auto; overflow-x:hidden; }
+  .screen { display:none; min-height:100%; padding:12px 16px; }
+  .screen.active { display:flex; flex-direction:column; }
+  #screen-tap { align-items:center; justify-content:center; gap:24px; }
+  .coin-wrap { position:relative; width:min(64vw,260px); aspect-ratio:1; }
+  .coin { width:100%; height:100%; border-radius:50%; border:0; cursor:pointer; font-size:min(30vw,120px); line-height:1;
+    background:radial-gradient(circle at 35% 30%,#35516d,#1f2c3a 70%); box-shadow:0 0 0 6px rgba(82,136,193,.25),0 14px 40px rgba(0,0,0,.5);
+    transition:transform .08s ease; touch-action:manipulation; }
+  .coin.cooldown { opacity:.6; }
+  .coin.pressed { transform:scale(0.92); }
+  .float { position:absolute; font-weight:800; font-size:26px; color:var(--gold); pointer-events:none; animation:rise .8s ease-out forwards; }
+  @keyframes rise { to { transform:translateY(-90px); opacity:0; } }
+  .btn { width:100%; padding:14px 16px; border:0; border-radius:14px; cursor:pointer; background:var(--accent); color:#fff;
+    font:600 16px system-ui,sans-serif; box-shadow:0 4px 12px rgba(0,0,0,.35); transition:transform .1s; }
+  .btn:active { transform:scale(0.95); }
+  .btn[disabled] { background:var(--panel); color:var(--muted); box-shadow:none; }
+  #withdraw { display:none; max-width:320px; }
+  .card { background:var(--panel); border-radius:16px; padding:14px; margin-bottom:12px; box-shadow:0 4px 12px rgba(0,0,0,.25); }
+  .card h3 { font-size:17px; }
+  .card p { font-size:13px; color:var(--muted); margin:4px 0 12px; }
+  h2 { font-size:20px; margin:4px 0 14px; }
+  nav { display:flex; background:var(--panel); padding:8px 8px calc(8px + env(safe-area-inset-bottom,0)); gap:6px; }
+  nav button { flex:1; padding:10px 4px; border:0; border-radius:12px; background:transparent; color:var(--muted); font:600 14px system-ui,sans-serif; cursor:pointer; transition:transform .1s; }
+  nav button:active { transform:scale(0.95); }
+  nav button.active { background:rgba(82,136,193,.2); color:var(--accent); }
+  #toast { position:fixed; left:50%; top:150px; transform:translateX(-50%); background:#000c; color:#fff; padding:10px 18px; border-radius:20px; font-size:14px; opacity:0; pointer-events:none; transition:opacity .2s; z-index:50; }
+  #toast.show { opacity:1; }
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <div class="balance"><span>⭐</span> <b id="coins">0</b></div>
+    <div class="per-tap" id="perTap">+0.25 за тап</div>
+    <div class="energy">
+      <div class="energy-top"><span>⚡ Энергия</span><span id="energyText">100 / 100</span></div>
+      <div class="bar"><i id="energyBar"></i></div>
+    </div>
+  </header>
+  <main>
+    <section id="screen-tap" class="screen active">
+      <div class="coin-wrap" id="coinWrap"><button class="coin" id="coin" aria-label="Тап">⭐</button></div>
+      <button class="btn" id="withdraw">Вывести 100</button>
+    </section>
+    <section id="screen-upgrade" class="screen">
+      <h2>Прокачка</h2>
+      <div class="card"><h3>Сила тапа</h3><p>Больше монет за каждый тап</p><button class="btn" id="buyPower"></button></div>
+      <div class="card"><h3>Запас энергии</h3><p>+50 к максимуму и полная зарядка</p><button class="btn" id="buyEnergy"></button></div>
+      <div class="card"><h3>Автотап</h3><p>Каждые 2 секунды монеты сами, без траты энергии</p><button class="btn" id="buyAuto"></button></div>
+    </section>
+    <section id="screen-shop" class="screen">
+      <h2>Магазин</h2>
+      <div class="card"><h3>Буст x2 на 5 минут</h3><p>Двойные монеты за тап</p><button class="btn" id="buyBoost">Купить в боте за 50 ⭐</button></div>
+      <div class="card"><h3>Пополнить энергию</h3><p>Мгновенно до максимума</p><button class="btn" id="buyRefill">Купить в боте за 20 ⭐</button></div>
+    </section>
+  </main>
+  <nav>
+    <button class="active" data-tab="tap">👆 Тап</button>
+    <button data-tab="upgrade">🚀 Прокачка</button>
+    <button data-tab="shop">🛒 Магазин</button>
+  </nav>
+</div>
+<div id="toast"></div>
+
+<script>
+  const tg = window.Telegram?.WebApp || {
+    ready() {},
+    expand() {},
+    setHeaderColor() {},
+    setBackgroundColor() {},
+    showAlert(msg) { alert(msg); },
+    openTelegramLink(url) { window.open(url, "_blank"); },
+    HapticFeedback: { impactOccurred() {} }
+  };
+
+  try {
+    tg.ready();
+    tg.expand();
+    tg.setHeaderColor("#17212b");
+    tg.setBackgroundColor("#17212b");
+  } catch (e) {}
+
+  const BOT_USERNAME = "EasyStarsTapBot";
+  const TAP_DELAY = 1000;
+  const STORAGE_KEY = "starTapper2";
+
+  let coins = 0;
+  let tapPower = 0.25;
+  let maxEnergy = 100;
+  let energy = 100;
+  let autoTap = false;
+  let boostUntil = 0;
+
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (raw) {
+      const s = JSON.parse(raw);
+      coins = Number.isFinite(s.coins) ? Math.max(0, s.coins) : 0;
+      tapPower = Number.isFinite(s.tapPower) && s.tapPower > 0 ? s.tapPower : 0.25;
+      maxEnergy = Number.isFinite(s.maxEnergy) && s.maxEnergy >= 100 ? s.maxEnergy : 100;
+      energy = Number.isFinite(s.energy) ? Math.max(0, Math.min(s.energy, maxEnergy)) : maxEnergy;
+      autoTap = Boolean(s.autoTap);
+      boostUntil = Number.isFinite(s.boostUntil) ? s.boostUntil : 0;
+    }
+  } catch (e) {}
+
+  function save() {
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify({
+        coins, tapPower, maxEnergy, energy, autoTap, boostUntil
+      }));
+    } catch (e) {}
+  }
+
+  const $ = id => document.getElementById(id);
+  const fmt = n => (Math.floor(n * 100 + 1e-6) / 100).toLocaleString("ru-RU", { maximumFractionDigits: 2 });
+  const boostActive = () => Date.now() < boostUntil;
+  const curPower = () => tapPower * (boostActive() ? 2 : 1);
+
+  function render() {
+    $("coins").textContent = fmt(coins);
+    $("perTap").textContent = "+" + fmt(curPower()) + " за тап" + (boostActive() ? " 🔥 x2" : "");
+    $("energyText").textContent = Math.floor(energy) + " / " + maxEnergy;
+    $("energyBar").style.width = Math.max(0, Math.min(100, (energy / maxEnergy) * 100)) + "%";
+    $("buyPower").textContent = "Купить за " + fmt(tapPower * 200) + " ⭐ (сейчас +" + fmt(tapPower) + ")";
+    $("buyEnergy").textContent = "Купить за " + fmt(maxEnergy * 10) + " ⭐ (сейчас " + maxEnergy + ")";
+    $("buyAuto").textContent = autoTap ? "Куплено ✓" : "Купить за 500 ⭐";
+    $("buyAuto").disabled = autoTap;
+    $("withdraw").style.display = coins >= 100 ? "block" : "none";
+    save();
+  }
+
+  let toastTimer;
+  function toast(text, ms = 1200) {
+    const t = $("toast");
+    t.textContent = text;
+    t.classList.add("show");
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => t.classList.remove("show"), ms);
+  }
+
+  function floatText(x, y, text) {
+    const el = document.createElement("div");
+    el.className = "float";
+    el.textContent = text;
+    const r = $("coinWrap").getBoundingClientRect();
+    const px = Number.isFinite(x) ? x - r.left - 10 : r.width / 2 - 10;
+    const py = Number.isFinite(y) ? y - r.top - 20 : r.height / 2 - 20;
+    el.style.left = px + "px";
+    el.style.top = py + "px";
+    $("coinWrap").appendChild(el);
+    setTimeout(() => el.remove(), 800);
+  }
+
+  let lastTap = 0;
+  $("coin").addEventListener("pointerdown", e => {
+    e.preventDefault();
+    const now = Date.now();
+    if (now - lastTap < TAP_DELAY) return;
+    lastTap = now;
+
+    $("coin").classList.add("cooldown");
+    setTimeout(() => $("coin").classList.remove("cooldown"), TAP_DELAY);
+
+    if (energy <= 0) {
+      toast("Энергия закончилась");
+      return;
+    }
+
+    const gain = curPower();
+    coins += gain;
+    energy = Math.max(0, energy - 1);
+
+    try { tg.HapticFeedback.impactOccurred("light"); } catch (err) {}
+    $("coin").classList.add("pressed");
+    setTimeout(() => $("coin").classList.remove("pressed"), 90);
+
+    floatText(e.clientX, e.clientY, "+" + fmt(gain));
+    render();
+  });
+
+  setInterval(() => {
+    if (energy < maxEnergy) {
+      energy = Math.min(maxEnergy, energy + 1);
+      render();
+    }
+  }, 3000);
+
+  setInterval(() => {
+    if (autoTap) {
+      coins += tapPower;
+      render();
+    }
+  }, 2000);
+
+  setInterval(() => {
+    if (boostUntil && !boostActive()) {
+      boostUntil = 0;
+      render();
+      toast("Буст x2 закончился", 2000);
+    }
+  }, 1000);
+
+  function pay(price) {
+    if (coins < price) {
+      tg.showAlert("Недостаточно монет");
+      return false;
+    }
+    coins -= price;
+    return true;
+  }
+
+  $("buyPower").onclick = () => {
+    if (pay(tapPower * 200)) {
+      tapPower += 0.25;
+      render();
+    }
+  };
+
+  $("buyEnergy").onclick = () => {
+    if (pay(maxEnergy * 10)) {
+      maxEnergy += 50;
+      energy = maxEnergy;
+      render();
+    }
+  };
+
+  $("buyAuto").onclick = () => {
+    if (autoTap) return;
+    if (pay(500)) {
+      autoTap = true;
+      render();
+    }
+  };
+
+  function openBotParam(param) {
+    const cleanBot = BOT_USERNAME.replace(/^@/, "");
+    const url = "https://t.me/" + cleanBot + "?start=" + encodeURIComponent(param);
+    try { tg.openTelegramLink(url); } catch (e) { window.open(url, "_blank"); }
+  }
+
+  $("withdraw").onclick = () => openBotParam("withdraw");
+  $("buyBoost").onclick = () => openBotParam("shop_boost");
+  $("buyRefill").onclick = () => openBotParam("shop_refill");
+
+  document.querySelectorAll("nav button").forEach(btn => {
+    btn.onclick = () => {
+      document.querySelectorAll("nav button").forEach(b => b.classList.toggle("active", b === btn));
+      document.querySelectorAll(".screen").forEach(s => s.classList.remove("active"));
+      $("screen-" + btn.dataset.tab).classList.add("active");
+    };
+  });
+
+  render();
+</script>
+</body>
+</html>
